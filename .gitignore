@@ -1,0 +1,4 @@
+results/*
+snapshot/*
+depth_analysis_output/*
+pipe-python/__pycache__/*
