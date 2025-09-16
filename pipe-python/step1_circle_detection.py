@@ -242,7 +242,7 @@ def process_rgb_image(image_path: str, output_dir: str, filename_prefix: str = "
 
 if __name__ == "__main__":
     # Example usage
-    image_path = "../snapshot/DS87_2025_09_15_16_40_50_0268/Color_00000000.jpg"
+    image_path = "../snapshot/DS87_2025_09_16_19_58_53_0268/Color_00000000.jpg"
     output_dir = "../results/step1_output"
     
     if os.path.exists(image_path):

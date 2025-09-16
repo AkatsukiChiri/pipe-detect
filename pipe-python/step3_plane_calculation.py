@@ -362,8 +362,8 @@ def calculate_plane_geometry(analysis_results: List[Dict], depth_image_path: str
     
     # Load depth image
     depth_image = cv2.imread(depth_image_path, cv2.IMREAD_ANYDEPTH).astype(np.float32)
-    depth_image[depth_image == 0] = np.nan
-    depth_image[depth_image > 5000] = np.nan
+    # Filter out invalid depth values - only keep values in valid range (100-5000)
+    depth_image[(depth_image < 100.0) | (depth_image > 5000.0)] = np.nan
     
     print(f"Calculating plane geometry for {len(analysis_results)} detected shapes...")
     

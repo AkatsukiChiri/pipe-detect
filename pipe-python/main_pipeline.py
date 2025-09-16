@@ -51,7 +51,8 @@ class CircularPlaneDetectionPipeline:
     
     def run_pipeline(self, rgb_image_path: str, depth_image_path: str,
                     session_name: Optional[str] = None, 
-                    camera_params: Optional[Dict] = None) -> Dict:
+                    camera_params: Optional[Dict] = None,
+                    ring_width: int = 3) -> Dict:
         """
         Run the complete pipeline on a single RGB-D image pair.
         
@@ -60,6 +61,7 @@ class CircularPlaneDetectionPipeline:
             depth_image_path: Path to corresponding depth image
             session_name: Optional session name for output organization
             camera_params: Optional camera intrinsic parameters
+            ring_width: Width of the ring to extract for pipe detection (default: 3 pixels)
             
         Returns:
             Dictionary with complete pipeline results
@@ -116,7 +118,7 @@ class CircularPlaneDetectionPipeline:
             
             step2_output_dir = os.path.join(session_dir, "step2_depth_analysis")
             analysis_results = analyze_shapes_depth(
-                detection_data, depth_image_path, step2_output_dir, "")
+                detection_data, depth_image_path, step2_output_dir, "", ring_width=ring_width)
             
             step2_time = time.time() - step2_start
             results['step_results']['step2'] = {
@@ -315,8 +317,8 @@ def main():
     pipeline = CircularPlaneDetectionPipeline(output_base_dir="../results")
     
     # Single image processing
-    rgb_path = "../snapshot/DS87_2025_09_16_19_58_53_0268/Color_00000000.jpg"
-    depth_path = "../snapshot/DS87_2025_09_16_19_58_53_0268/Depth_00000000.png"
+    rgb_path = "../snapshot/DS87_2025_09_16_20_20_32_0268/Color_00000000.jpg"
+    depth_path = "../snapshot/DS87_2025_09_16_20_20_32_0268/Depth_00000000.png"
     
     if os.path.exists(rgb_path) and os.path.exists(depth_path):
         results = pipeline.run_pipeline(rgb_path, depth_path, "example_run")
