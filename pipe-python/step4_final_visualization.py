@@ -140,13 +140,13 @@ class FinalVisualizer:
         
         return result_image
     
-    def create_comprehensive_visualization(self, rgb_image: np.ndarray, plane_properties_list: List[Dict],
+    def create_comprehensive_visualization(self, ir_image: np.ndarray, plane_properties_list: List[Dict],
                                          depth_image: np.ndarray, output_path: str) -> None:
         """
         Create a comprehensive visualization with multiple views.
         
         Args:
-            rgb_image: Original RGB image
+            ir_image: Original IR grayscale image (converted to BGR)
             plane_properties_list: List of detected plane properties
             depth_image: Depth image array
             output_path: Path to save the visualization
@@ -156,7 +156,7 @@ class FinalVisualizer:
         # Main RGB image with annotations
         ax1 = fig.add_subplot(2, 3, (1, 2))
         
-        result_image = rgb_image.copy()
+        result_image = ir_image.copy()
         depth_shape = depth_image.shape
         
         # Draw all detected planes
@@ -180,8 +180,8 @@ class FinalVisualizer:
         
         # Original RGB image
         ax2 = fig.add_subplot(2, 3, 3)
-        ax2.imshow(cv2.cvtColor(rgb_image, cv2.COLOR_BGR2RGB))
-        ax2.set_title('Original RGB Image')
+        ax2.imshow(cv2.cvtColor(ir_image, cv2.COLOR_BGR2RGB))
+        ax2.set_title('Original IR Image')
         ax2.axis('off')
         
         # Depth image
@@ -266,13 +266,13 @@ class FinalVisualizer:
         plt.savefig(output_path, dpi=300, bbox_inches='tight')
         plt.close()
     
-    def create_simple_result_image(self, rgb_image: np.ndarray, plane_properties_list: List[Dict],
+    def create_simple_result_image(self, ir_image: np.ndarray, plane_properties_list: List[Dict],
                                   depth_shape: Tuple[int, int], output_path: str) -> np.ndarray:
         """
-        Create a simple result image showing only the detected planes on original RGB.
+        Create a simple result image showing only the detected planes on original IR.
         
         Args:
-            rgb_image: Original RGB image
+            ir_image: Original IR grayscale image (converted to BGR)
             plane_properties_list: List of detected plane properties
             depth_shape: Shape of depth image
             output_path: Path to save the result image
@@ -280,7 +280,7 @@ class FinalVisualizer:
         Returns:
             Result image with annotations
         """
-        result_image = rgb_image.copy()
+        result_image = ir_image.copy()
         
         colors = [(0, 255, 0), (255, 0, 0), (0, 255, 255), (255, 255, 0), (255, 0, 255)]
         
@@ -301,24 +301,29 @@ class FinalVisualizer:
         return result_image
 
 
-def create_final_visualization(rgb_image_path: str, plane_properties_list: List[Dict],
+def create_final_visualization(ir_image_path: str, plane_properties_list: List[Dict],
                              depth_image_path: str, output_dir: str, 
                              filename_prefix: str = "") -> None:
     """
     Create final visualization showing detected planes and normal vectors.
     
     Args:
-        rgb_image_path: Path to original RGB image
+        ir_image_path: Path to original IR grayscale image
         plane_properties_list: List of plane properties from step 3
         depth_image_path: Path to depth image
         output_dir: Directory to save results
         filename_prefix: Prefix for output filenames
     """
     # Load images
-    rgb_image = cv2.imread(rgb_image_path)
+    ir_image_gray = cv2.imread(ir_image_path, cv2.IMREAD_GRAYSCALE)
+    if ir_image_gray is None:
+        raise ValueError(f"Could not load IR image: {ir_image_path}")
+    
+    # Convert IR image to 3-channel for visualization compatibility
+    ir_image = cv2.cvtColor(ir_image_gray, cv2.COLOR_GRAY2BGR)
+    
     depth_image = cv2.imread(depth_image_path, cv2.IMREAD_ANYDEPTH).astype(np.float32)
-    depth_image[depth_image == 0] = np.nan
-    depth_image[depth_image > 5000] = np.nan
+    depth_image[(depth_image < 100.0) | (depth_image > 5000.0)] = np.nan
     
     # Initialize visualizer
     visualizer = FinalVisualizer()
@@ -331,18 +336,28 @@ def create_final_visualization(rgb_image_path: str, plane_properties_list: List[
     # Create comprehensive visualization
     comprehensive_path = os.path.join(output_dir, f"{filename_prefix}step4_comprehensive_results.png")
     visualizer.create_comprehensive_visualization(
-        rgb_image, plane_properties_list, depth_image, comprehensive_path)
+        ir_image, plane_properties_list, depth_image, comprehensive_path)
     
     # Create simple result image
     simple_path = os.path.join(output_dir, f"{filename_prefix}step4_final_result.jpg")
     result_image = visualizer.create_simple_result_image(
-        rgb_image, plane_properties_list, depth_image.shape, simple_path)
+        ir_image, plane_properties_list, depth_image.shape, simple_path)
     
     print(f"Final visualization saved to:")
     print(f"  Comprehensive: {comprehensive_path}")
     print(f"  Simple result: {simple_path}")
     
     return result_image
+
+
+# Backward compatibility alias
+def create_final_visualization_rgb(rgb_image_path: str, plane_properties_list: List[Dict],
+                                  depth_image_path: str, output_dir: str, 
+                                  filename_prefix: str = "") -> None:
+    """
+    Backward compatibility function - now processes IR images.
+    """
+    return create_final_visualization(rgb_image_path, plane_properties_list, depth_image_path, output_dir, filename_prefix)
 
 
 if __name__ == "__main__":

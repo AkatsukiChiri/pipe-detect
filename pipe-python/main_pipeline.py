@@ -49,15 +49,15 @@ class CircularPlaneDetectionPipeline:
         self.session_dir = session_dir
         return session_dir
     
-    def run_pipeline(self, rgb_image_path: str, depth_image_path: str,
+    def run_pipeline(self, ir_image_path: str, depth_image_path: str,
                     session_name: Optional[str] = None, 
                     camera_params: Optional[Dict] = None,
                     ring_width: int = 3) -> Dict:
         """
-        Run the complete pipeline on a single RGB-D image pair.
+        Run the complete pipeline on a single IR-D image pair.
         
         Args:
-            rgb_image_path: Path to RGB image
+            ir_image_path: Path to IR grayscale image
             depth_image_path: Path to corresponding depth image
             session_name: Optional session name for output organization
             camera_params: Optional camera intrinsic parameters
@@ -69,7 +69,7 @@ class CircularPlaneDetectionPipeline:
         print("="*60)
         print("CIRCULAR PLANE DETECTION PIPELINE")
         print("="*60)
-        print(f"RGB Image: {rgb_image_path}")
+        print(f"IR Image: {ir_image_path}")
         print(f"Depth Image: {depth_image_path}")
         print()
         
@@ -81,7 +81,7 @@ class CircularPlaneDetectionPipeline:
         # Initialize results dictionary
         results = {
             'session_dir': session_dir,
-            'rgb_image_path': rgb_image_path,
+            'ir_image_path': ir_image_path,
             'depth_image_path': depth_image_path,
             'camera_params': camera_params,
             'timestamp': datetime.now().isoformat(),
@@ -92,13 +92,13 @@ class CircularPlaneDetectionPipeline:
         
         try:
             # Step 1: Circle and Ellipse Detection
-            print("STEP 1: Circle and Ellipse Detection in RGB Image")
+            print("STEP 1: Circle and Ellipse Detection in IR Image")
             print("-" * 50)
             step1_start = time.time()
             
             step1_output_dir = os.path.join(session_dir, "step1_circle_detection")
             detection_data, result_image = process_rgb_image(
-                rgb_image_path, step1_output_dir, "")
+                ir_image_path, step1_output_dir, "")
             
             step1_time = time.time() - step1_start
             results['step_results']['step1'] = {
@@ -162,7 +162,7 @@ class CircularPlaneDetectionPipeline:
             
             step4_output_dir = os.path.join(session_dir, "step4_final_visualization")
             final_result_image = create_final_visualization(
-                rgb_image_path, plane_properties_list, depth_image_path, step4_output_dir, "")
+                ir_image_path, plane_properties_list, depth_image_path, step4_output_dir, "")
             
             step4_time = time.time() - step4_start
             results['step_results']['step4'] = {
@@ -266,10 +266,10 @@ class CircularPlaneDetectionPipeline:
     def run_batch_processing(self, image_pairs: List[Dict], 
                            camera_params: Optional[Dict] = None) -> List[Dict]:
         """
-        Run pipeline on multiple RGB-D image pairs.
+        Run pipeline on multiple IR-D image pairs.
         
         Args:
-            image_pairs: List of dictionaries with 'rgb_path' and 'depth_path' keys
+            image_pairs: List of dictionaries with 'ir_path' and 'depth_path' keys
             camera_params: Optional camera intrinsic parameters
             
         Returns:
@@ -283,10 +283,10 @@ class CircularPlaneDetectionPipeline:
         for i, pair in enumerate(image_pairs):
             print(f"Processing pair {i+1}/{len(image_pairs)}")
             
-            session_name = f"batch_{i+1:03d}_{os.path.basename(pair['rgb_path']).split('.')[0]}"
+            session_name = f"batch_{i+1:03d}_{os.path.basename(pair['ir_path']).split('.')[0]}"
             
             result = self.run_pipeline(
-                pair['rgb_path'], 
+                pair['ir_path'], 
                 pair['depth_path'], 
                 session_name, 
                 camera_params
@@ -317,11 +317,11 @@ def main():
     pipeline = CircularPlaneDetectionPipeline(output_base_dir="../results")
     
     # Single image processing
-    rgb_path = "../snapshot/DS87_2025_09_16_20_20_32_0268/Color_00000000.jpg"
-    depth_path = "../snapshot/DS87_2025_09_16_20_20_32_0268/Depth_00000000.png"
+    ir_path = "../snapshot/DS87_2025_09_16_20_21_09_0268/IR_00000000.png"
+    depth_path = "../snapshot/DS87_2025_09_16_20_21_09_0268/Depth_00000000.png"
     
-    if os.path.exists(rgb_path) and os.path.exists(depth_path):
-        results = pipeline.run_pipeline(rgb_path, depth_path, "example_run")
+    if os.path.exists(ir_path) and os.path.exists(depth_path):
+        results = pipeline.run_pipeline(ir_path, depth_path, "example_run")
         
         if results['success']:
             print("Pipeline completed successfully!")
@@ -329,7 +329,7 @@ def main():
             print(f"Pipeline failed: {results['error']}")
     else:
         print("Example images not found. Please provide valid image paths.")
-        print(f"Expected RGB image: {rgb_path}")
+        print(f"Expected IR image: {ir_path}")
         print(f"Expected depth image: {depth_path}")
 
 

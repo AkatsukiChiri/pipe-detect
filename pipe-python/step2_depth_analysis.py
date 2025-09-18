@@ -57,26 +57,26 @@ class DepthPlaneAnalyzer:
         
         return depth_float
     
-    def scale_coordinates(self, rgb_coords: Tuple[int, int], rgb_shape: Tuple[int, int, int], 
+    def scale_coordinates(self, ir_coords: Tuple[int, int], ir_shape: Tuple[int, int, int], 
                          depth_shape: Tuple[int, int]) -> Tuple[int, int]:
         """
-        Scale coordinates from RGB image space to depth image space.
+        Scale coordinates from IR image space to depth image space.
         
         Args:
-            rgb_coords: (x, y) coordinates in RGB image
-            rgb_shape: Shape of RGB image (H, W, C)
+            ir_coords: (x, y) coordinates in IR image
+            ir_shape: Shape of IR image (H, W, C)
             depth_shape: Shape of depth image (H, W)
             
         Returns:
             Scaled coordinates for depth image
         """
-        x, y = rgb_coords
-        rgb_h, rgb_w = rgb_shape[:2]
+        x, y = ir_coords
+        ir_h, ir_w = ir_shape[:2]
         depth_h, depth_w = depth_shape
         
         # Scale coordinates
-        scaled_x = int(x * depth_w / rgb_w)
-        scaled_y = int(y * depth_h / rgb_h)
+        scaled_x = int(x * depth_w / ir_w)
+        scaled_y = int(y * depth_h / ir_h)
         
         # Ensure coordinates are within bounds
         scaled_x = max(0, min(scaled_x, depth_w - 1))
@@ -307,7 +307,7 @@ class DepthPlaneAnalyzer:
         return stats_dict
     
     def visualize_depth_analysis(self, depth_image: np.ndarray, analysis_results: List[Dict], 
-                               output_path: str, rgb_detection_data: Dict = None) -> None:
+                               output_path: str, ir_detection_data: Dict = None) -> None:
         """
         Create visualization of depth analysis results.
         
@@ -315,31 +315,31 @@ class DepthPlaneAnalyzer:
             depth_image: Original depth image
             analysis_results: List of analysis results for each detected shape
             output_path: Path to save visualization
-            rgb_detection_data: Original RGB detection data for comparison (optional)
+            ir_detection_data: Original IR detection data for comparison (optional)
         """
         fig, ax_array = plt.subplots(2, 2, figsize=(15, 12))
         
         # Original depth image with coordinate comparison
         ax_array[0, 0].imshow(depth_image, cmap='viridis')
         
-        # If RGB detection data is provided, show scaled vs original coordinates
-        if rgb_detection_data is not None:
-            rgb_shape = rgb_detection_data['image_shape']
+        # If IR detection data is provided, show scaled vs original coordinates
+        if ir_detection_data is not None:
+            ir_shape = ir_detection_data['image_shape']
             depth_shape = depth_image.shape
             
-            # Draw original RGB circles scaled to depth image size for comparison
-            for i, (x, y, r) in enumerate(rgb_detection_data['circles']):
+            # Draw original IR circles scaled to depth image size for comparison
+            for i, (x, y, r) in enumerate(ir_detection_data['circles']):
                 # Manual scaling for comparison
-                scaled_x = int(x * depth_shape[1] / rgb_shape[1])
-                scaled_y = int(y * depth_shape[0] / rgb_shape[0])
-                scaled_r = int(r * depth_shape[1] / rgb_shape[1])
+                scaled_x = int(x * depth_shape[1] / ir_shape[1])
+                scaled_y = int(y * depth_shape[0] / ir_shape[0])
+                scaled_r = int(r * depth_shape[1] / ir_shape[1])
                 
                 # Draw circle in red for comparison
                 circle = plt.Circle((scaled_x, scaled_y), scaled_r, fill=False, color='red', linewidth=1, alpha=0.7)
                 ax_array[0, 0].add_patch(circle)
-                ax_array[0, 0].text(scaled_x, scaled_y, f'RGB{i}', color='red', fontsize=8, ha='center', va='center')
+                ax_array[0, 0].text(scaled_x, scaled_y, f'IR{i}', color='red', fontsize=8, ha='center', va='center')
         
-        ax_array[0, 0].set_title('Original Depth Image (with RGB circles in red)')
+        ax_array[0, 0].set_title('Original Depth Image (with IR circles in red)')
         ax_array[0, 0].axis('off')
         
         # Depth image with detected regions
@@ -416,14 +416,14 @@ class DepthPlaneAnalyzer:
         plt.close()
 
 
-def analyze_shapes_depth(rgb_detection_data: Dict, depth_image_path: str, 
+def analyze_shapes_depth(ir_detection_data: Dict, depth_image_path: str, 
                         output_dir: str, filename_prefix: str = "", ring_width: int = 3) -> List[Dict]:
     """
     Analyze depth data for detected circular and elliptical shapes.
     For pipe detection, only analyzes the ring/circumference points, not the entire filled area.
     
     Args:
-        rgb_detection_data: Detection results from step 1
+        ir_detection_data: Detection results from step 1 (IR image)
         depth_image_path: Path to corresponding depth image
         output_dir: Directory to save results
         filename_prefix: Prefix for output filenames
@@ -439,23 +439,23 @@ def analyze_shapes_depth(rgb_detection_data: Dict, depth_image_path: str,
     depth_image = analyzer.load_depth_image(depth_image_path)
     
     # Get image shapes
-    rgb_shape = rgb_detection_data['image_shape']
+    ir_shape = ir_detection_data['image_shape']
     depth_shape = depth_image.shape
     
-    print(f"RGB image shape: {rgb_shape}")
+    print(f"IR image shape: {ir_shape}")
     print(f"Depth image shape: {depth_shape}")
     
     analysis_results = []
     
     # Analyze circles
-    for i, (x, y, r) in enumerate(rgb_detection_data['circles']):
+    for i, (x, y, r) in enumerate(ir_detection_data['circles']):
         # Scale coordinates to depth image space
-        scaled_x, scaled_y = analyzer.scale_coordinates((x, y), rgb_shape, depth_shape)
-        scaled_r = int(r * depth_shape[1] / rgb_shape[1])  # Scale radius
+        scaled_x, scaled_y = analyzer.scale_coordinates((x, y), ir_shape, depth_shape)
+        scaled_r = int(r * depth_shape[1] / ir_shape[1])  # Scale radius
         
-        print(f"Analyzing circle {i}: RGB({x},{y},r={r}) -> Depth({scaled_x},{scaled_y},r={scaled_r})")
-        print(f"  RGB shape: {rgb_shape}, Depth shape: {depth_shape}")
-        print(f"  Scale factors: x={depth_shape[1]/rgb_shape[1]:.3f}, y={depth_shape[0]/rgb_shape[0]:.3f}")
+        print(f"Analyzing circle {i}: IR({x},{y},r={r}) -> Depth({scaled_x},{scaled_y},r={scaled_r})")
+        print(f"  IR shape: {ir_shape}, Depth shape: {depth_shape}")
+        print(f"  Scale factors: x={depth_shape[1]/ir_shape[1]:.3f}, y={depth_shape[0]/ir_shape[0]:.3f}")
         
         # Extract depth region (only ring/circumference for pipe detection)
         depth_values, x_coords, y_coords = analyzer.extract_circle_depth_region(
@@ -469,7 +469,7 @@ def analyze_shapes_depth(rgb_detection_data: Dict, depth_image_path: str,
             plane_info = analyzer.fit_plane_ransac(depth_values, x_coords, y_coords)
             
             print(f"  -> {len(depth_values)} valid depth points found")
-            print(f"  -> Coordinates: RGB({x},{y},r={r}) -> Depth({scaled_x},{scaled_y},r={scaled_r})")
+            print(f"  -> Coordinates: IR({x},{y},r={r}) -> Depth({scaled_x},{scaled_y},r={scaled_r})")
             
             result = {
                 'shape_type': 'circle',
@@ -495,20 +495,20 @@ def analyze_shapes_depth(rgb_detection_data: Dict, depth_image_path: str,
             print(f"  -> Insufficient valid depth data: {valid_count} points (need {analyzer.min_valid_pixels})")
     
     # Analyze ellipses
-    for i, ellipse_data in enumerate(rgb_detection_data['ellipses']):
+    for i, ellipse_data in enumerate(ir_detection_data['ellipses']):
         center = ellipse_data['center']
         axes = ellipse_data['axes']
         angle = ellipse_data['angle']
         
         # Scale parameters to depth image space
-        scaled_center = analyzer.scale_coordinates(center, rgb_shape, depth_shape)
-        scale_x = depth_shape[1] / rgb_shape[1]
-        scale_y = depth_shape[0] / rgb_shape[0]
+        scaled_center = analyzer.scale_coordinates(center, ir_shape, depth_shape)
+        scale_x = depth_shape[1] / ir_shape[1]
+        scale_y = depth_shape[0] / ir_shape[0]
         scaled_axes = (axes[0] * scale_x, axes[1] * scale_y)
         
         scaled_ellipse_params = (scaled_center, scaled_axes, angle)
         
-        print(f"Analyzing ellipse {i}: RGB{center} -> Depth{scaled_center}")
+        print(f"Analyzing ellipse {i}: IR{center} -> Depth{scaled_center}")
         
         # Extract depth region
         scaled_ellipse_dict = {
@@ -559,9 +559,18 @@ def analyze_shapes_depth(rgb_detection_data: Dict, depth_image_path: str,
     
     # Visualize results
     viz_path = os.path.join(output_dir, f"{filename_prefix}step2_depth_analysis.png")
-    analyzer.visualize_depth_analysis(depth_image, analysis_results, viz_path, rgb_detection_data)
+    analyzer.visualize_depth_analysis(depth_image, analysis_results, viz_path, ir_detection_data)
     
     return analysis_results
+
+
+# Backward compatibility alias
+def analyze_shapes_depth_rgb(rgb_detection_data: Dict, depth_image_path: str, 
+                            output_dir: str, filename_prefix: str = "", ring_width: int = 3) -> List[Dict]:
+    """
+    Backward compatibility function - now processes IR detection data.
+    """
+    return analyze_shapes_depth(rgb_detection_data, depth_image_path, output_dir, filename_prefix, ring_width)
 
 
 if __name__ == "__main__":

@@ -22,56 +22,87 @@ class CircleEllipseDetector:
         self.min_radius = min_radius
         self.max_radius = max_radius
         
-    def preprocess_image(self, image: np.ndarray) -> np.ndarray:
+    def preprocess_image(self, image: np.ndarray, is_grayscale: bool = False) -> np.ndarray:
         """
         Preprocess the image for better circle/ellipse detection.
+        Enhanced for dark IR images with histogram equalization and adaptive thresholding.
 
         Args:
-            image: Input RGB image
+            image: Input image (grayscale or RGB)
+            is_grayscale: Whether the input image is already grayscale
 
         Returns:
             Preprocessed contour image (binary edge map)
         """
-        # Convert to grayscale
-        gray = cv2.cvtColor(image, cv2.COLOR_RGB2GRAY)
-
-        # # Apply Gaussian blur to reduce noise
-        # blurred = cv2.GaussianBlur(gray, (9, 9), 2)
-
-        # Use Canny edge detector to get contour image
-        # Raise the thresholds for stricter edge detection
-        edges = cv2.Canny(gray, 50, 150)
-
-        # 展示处理后的灰度图 (注释掉以避免在无GUI环境中出错)
-        # plt.figure(figsize=(6, 6))
-        # plt.imshow(edges, cmap='gray')
-        # plt.title('Preprocessed Grayscale (Edge Map)')
-        # plt.axis('off')
-        # plt.show()
+        # Handle grayscale vs RGB input
+        if is_grayscale:
+            if len(image.shape) == 3:
+                gray = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY)
+            else:
+                gray = image.copy()
+        else:
+            # Convert to grayscale
+            gray = cv2.cvtColor(image, cv2.COLOR_RGB2GRAY)
+        
+        # Apply histogram equalization to enhance contrast for dark IR images
+        gray_enhanced = cv2.equalizeHist(gray)
+        
+        # Apply CLAHE (Contrast Limited Adaptive Histogram Equalization) for better local contrast
+        clahe = cv2.createCLAHE(clipLimit=2.0, tileGridSize=(8,8))
+        gray_adaptive = clahe.apply(gray_enhanced)
+        
+        # Apply Gaussian blur to reduce noise
+        gray_blurred = cv2.GaussianBlur(gray_adaptive, (3, 3), 0)
+        
+        # Use Canny edge detector with lower thresholds for dark images
+        edges = cv2.Canny(gray_blurred, 50, 150)
+        
+        # Apply morphological operations to connect broken edges
+        kernel = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (3, 3))
+        edges = cv2.morphologyEx(edges, cv2.MORPH_CLOSE, kernel)
+        
+        # 展示处理后的结果 (注释掉以避免在无GUI环境中出错)
+        plt.figure(figsize=(15, 5))
+        plt.subplot(1, 3, 1)
+        plt.imshow(gray, cmap='gray')
+        plt.title('Original Grayscale')
+        plt.axis('off')
+        
+        plt.subplot(1, 3, 2)
+        plt.imshow(gray_adaptive, cmap='gray')
+        plt.title('Enhanced (CLAHE)')
+        plt.axis('off')
+        
+        plt.subplot(1, 3, 3)
+        plt.imshow(edges, cmap='gray')
+        plt.title('Edge Map')
+        plt.axis('off')
+        plt.show()
 
         return edges
     
-    def detect_circles_hough(self, image: np.ndarray) -> List[Tuple[int, int, int]]:
+    def detect_circles_hough(self, image: np.ndarray, is_grayscale: bool = False) -> List[Tuple[int, int, int]]:
         """
-        Detect circles using Hough Circle Transform, with stricter filtering to reduce false positives.
+        Detect circles using Hough Circle Transform, optimized for dark IR images.
         
         Args:
-            image: Input RGB image
+            image: Input image (grayscale or RGB)
+            is_grayscale: Whether the input image is already grayscale
             
         Returns:
             List of detected circles as (x, y, radius)
         """
         # Preprocess image to get edge map
-        edge_img = self.preprocess_image(image)
+        edge_img = self.preprocess_image(image, is_grayscale)
 
-        # Use a more restrictive HoughCircles configuration
+        # Use optimized HoughCircles configuration for dark IR images
         circles = cv2.HoughCircles(
             edge_img,
             cv2.HOUGH_GRADIENT,
-            dp=1.2,                # Slightly increase dp for more robust detection
-            minDist=80,            # Increase minDist to avoid multiple detections of same circle
-            param1=100,            # Higher Canny high threshold for stricter edge detection
-            param2=60,             # Increase accumulator threshold to require stronger evidence
+            dp=1.0,                # Lower dp for better precision
+            minDist=50,            # Reduce minDist for closer circles
+            param1=50,             # Lower param1 for weaker edges
+            param2=30,             # Lower param2 for less strict accumulator threshold
             minRadius=self.min_radius,
             maxRadius=self.max_radius
         )
@@ -95,15 +126,15 @@ class CircleEllipseDetector:
                 detected_circles.append((x, y, r))
         return detected_circles
     
-    def detect_ellipses_contour(self, image: np.ndarray) -> List[Dict]:
+    def detect_ellipses_contour(self, image: np.ndarray, is_grayscale: bool = False) -> List[Dict]:
         """
         Detect ellipses using contour detection and ellipse fitting.
-        改进：减少误检，优先找到最明显的椭圆（面积最大、长宽比合适、边缘清晰）。
+        Optimized for dark IR images with enhanced preprocessing.
         """
-        gray = self.preprocess_image(image)
+        gray = self.preprocess_image(image, is_grayscale)
 
-        # Edge detection with slightly higher thresholds for less clutter
-        edges = cv2.Canny(gray, 80, 200)
+        # Edge detection with lower thresholds for dark IR images
+        edges = cv2.Canny(gray, 30, 80)
 
         # Morphological closing to connect broken edges
         kernel = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (7, 7))
@@ -117,7 +148,8 @@ class CircleEllipseDetector:
 
         for contour in contours:
             area = cv2.contourArea(contour)
-            if len(contour) >= 20 and area > 1000:
+            # Lower area threshold for 640x480 resolution (vs original 1600x1200)
+            if len(contour) >= 20 and area > 400:
                 try:
                     ellipse = cv2.fitEllipse(contour)
                     center, axes, angle = ellipse
@@ -201,25 +233,29 @@ class CircleEllipseDetector:
         return result_image
 
 
-def process_rgb_image(image_path: str, output_dir: str, filename_prefix: str = ""):
+def process_ir_image(image_path: str, output_dir: str, filename_prefix: str = ""):
     """
-    Process a single RGB image to detect circles and ellipses.
+    Process a single IR grayscale image to detect circles and ellipses.
     
     Args:
-        image_path: Path to the input RGB image
+        image_path: Path to the input IR grayscale image
         output_dir: Directory to save results
         filename_prefix: Prefix for output filenames
     """
-    # Load image
-    image = cv2.imread(image_path)
-    image_rgb = cv2.cvtColor(image, cv2.COLOR_BGR2RGB)
+    # Load image as grayscale
+    image_gray = cv2.imread(image_path, cv2.IMREAD_GRAYSCALE)
+    if image_gray is None:
+        raise ValueError(f"Could not load IR image: {image_path}")
     
-    # Initialize detector
-    detector = CircleEllipseDetector(min_radius=20, max_radius=200)
+    # Initialize detector with smaller radius range for 640x480 resolution
+    detector = CircleEllipseDetector(min_radius=8, max_radius=80)
     
-    # Detect circles and ellipses
-    circles = detector.detect_circles_hough(image_rgb)
-    ellipses = detector.detect_ellipses_contour(image_rgb)
+    # Detect circles and ellipses directly on grayscale image
+    circles = detector.detect_circles_hough(image_gray, is_grayscale=True)
+    ellipses = detector.detect_ellipses_contour(image_gray, is_grayscale=True)
+    
+    # Convert to 3-channel for visualization
+    image_rgb = cv2.cvtColor(image_gray, cv2.COLOR_GRAY2RGB)
     
     print(f"Detected {len(circles)} circles and {len(ellipses)} ellipses")
     
@@ -240,9 +276,22 @@ def process_rgb_image(image_path: str, output_dir: str, filename_prefix: str = "
     return detection_data, result_image
 
 
+# Backward compatibility alias
+def process_rgb_image(image_path: str, output_dir: str, filename_prefix: str = ""):
+    """
+    Backward compatibility function - now processes IR images.
+    
+    Args:
+        image_path: Path to the input IR grayscale image (formerly RGB)
+        output_dir: Directory to save results
+        filename_prefix: Prefix for output filenames
+    """
+    return process_ir_image(image_path, output_dir, filename_prefix)
+
+
 if __name__ == "__main__":
     # Example usage
-    image_path = "../snapshot/DS87_2025_09_16_19_58_53_0268/Color_00000000.jpg"
+    image_path = "../snapshot/DS87_2025_09_16_20_20_32_0268/IR_00000000.png"
     output_dir = "../results/step1_output"
     
     if os.path.exists(image_path):
