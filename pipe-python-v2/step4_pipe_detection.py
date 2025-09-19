@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """
 Step 4: Pipe Detection Module
-Detect pipe structures and calculate their orientation/direction
+Detect pipe structures and calculate their orientation/direction for both circles and ellipses
 """
 
 import cv2
@@ -19,16 +19,18 @@ class PipeDetector:
             'min_depth_variation': 20,  # Minimum depth variation for pipe detection
             'gradient_threshold': 5.0,   # Minimum gradient for edge detection
             'symmetry_threshold': 0.7,   # Threshold for circular symmetry
-            'depth_consistency_threshold': 0.3  # Relative threshold for depth consistency
+            'depth_consistency_threshold': 0.3,  # Relative threshold for depth consistency
+            'ellipse_bonus': 0.1  # Bonus confidence for elliptical shapes (pipes often appear elliptical)
         }
     
-    def detect_pipe(self, depth_info, circle):
+    def detect_pipe(self, depth_info, shape):
         """
         Detect if the analyzed region contains a pipe structure
+        Enhanced to work with both circles and ellipses
         
         Args:
             depth_info: Depth analysis results from step 3
-            circle: Original circle detection results
+            shape: Original shape detection results (circle or ellipse)
             
         Returns:
             dict: Pipe detection results including direction if detected
@@ -39,20 +41,21 @@ class PipeDetector:
                 'confidence': 0.0,
                 'direction': None,
                 'pipe_axis': None,
-                'detection_details': 'No valid depth data'
+                'detection_details': 'No valid depth data',
+                'shape_type': shape.get('type', 'unknown')
             }
         
         # Analyze pipe characteristics
-        pipe_analysis = self._analyze_pipe_characteristics(depth_info)
+        pipe_analysis = self._analyze_pipe_characteristics(depth_info, shape)
         
         # Make pipe detection decision
-        is_pipe, confidence, details = self._decide_pipe_detection(pipe_analysis)
+        is_pipe, confidence, details = self._decide_pipe_detection(pipe_analysis, shape)
         
         # Calculate pipe direction if detected
         direction = None
         pipe_axis = None
         if is_pipe:
-            direction, pipe_axis = self._calculate_pipe_direction(depth_info, pipe_analysis)
+            direction, pipe_axis = self._calculate_pipe_direction(depth_info, pipe_analysis, shape)
         
         result = {
             'is_pipe': is_pipe,
@@ -60,14 +63,16 @@ class PipeDetector:
             'direction': direction,
             'pipe_axis': pipe_axis,
             'detection_details': details,
-            'analysis': pipe_analysis
+            'analysis': pipe_analysis,
+            'shape_type': shape.get('type', 'unknown')
         }
         
         return result
     
-    def _analyze_pipe_characteristics(self, depth_info):
+    def _analyze_pipe_characteristics(self, depth_info, shape):
         """
         Analyze characteristics that indicate a pipe structure
+        Enhanced for elliptical shapes
         """
         depth_region = depth_info['depth_region']
         depth_stats = depth_info['depth_stats']
@@ -91,12 +96,12 @@ class PipeDetector:
             analysis['gradient_strength'] = 0
             analysis['has_strong_gradients'] = False
         
-        # 3. Circular pattern analysis
-        analysis['has_circular_pattern'] = gradient_analysis.get('has_gradient_pattern', False)
+        # 3. Pattern analysis (adapted for shapes)
+        analysis['has_pipe_pattern'] = gradient_analysis.get('has_gradient_pattern', False)
         
         # 4. Depth consistency analysis (for cylindrical shape)
         if 'cleaned_depth' in gradient_analysis:
-            consistency_score = self._analyze_depth_consistency(gradient_analysis['cleaned_depth'])
+            consistency_score = self._analyze_depth_consistency(gradient_analysis['cleaned_depth'], shape)
             analysis['depth_consistency'] = consistency_score
             analysis['has_consistent_depth'] = (
                 consistency_score > self.pipe_detection_params['depth_consistency_threshold']
@@ -105,18 +110,121 @@ class PipeDetector:
             analysis['depth_consistency'] = 0
             analysis['has_consistent_depth'] = False
         
-        # 5. Cylindrical shape analysis
-        if 'cleaned_depth' in gradient_analysis:
-            cylindrical_score = self._analyze_cylindrical_shape(gradient_analysis['cleaned_depth'])
-            analysis['cylindrical_score'] = cylindrical_score
+        # 5. Shape-specific analysis
+        if shape.get('type') == 'ellipse':
+            ellipse_analysis = self._analyze_ellipse_pipe_characteristics(shape, depth_info)
+            analysis.update(ellipse_analysis)
         else:
-            analysis['cylindrical_score'] = 0
+            # Cylindrical shape analysis for circles
+            if 'cleaned_depth' in gradient_analysis:
+                cylindrical_score = self._analyze_cylindrical_shape(gradient_analysis['cleaned_depth'])
+                analysis['cylindrical_score'] = cylindrical_score
+            else:
+                analysis['cylindrical_score'] = 0
         
         return analysis
     
-    def _analyze_depth_consistency(self, cleaned_depth):
+    def _analyze_ellipse_pipe_characteristics(self, shape, depth_info):
+        """
+        Analyze characteristics specific to elliptical pipe cross-sections
+        """
+        analysis = {}
+        
+        # Ellipse aspect ratio analysis
+        axis_ratio = shape.get('axis_ratio', 1.0)
+        analysis['ellipse_axis_ratio'] = axis_ratio
+        
+        # Pipes often appear elliptical due to viewing angle
+        # Ratios between 0.3-0.9 are typical for pipes viewed at an angle
+        if 0.3 <= axis_ratio <= 0.9:
+            analysis['has_pipe_like_ratio'] = True
+            analysis['ratio_score'] = 1.0 - abs(axis_ratio - 0.6)  # Peak at 0.6 ratio
+        else:
+            analysis['has_pipe_like_ratio'] = False
+            analysis['ratio_score'] = 0.0
+        
+        # Ellipse orientation analysis
+        angle = shape.get('angle', 0)
+        analysis['ellipse_angle'] = angle
+        
+        # Analyze depth variation along major vs minor axis
+        if 'cleaned_depth' in depth_info['gradient_analysis']:
+            axis_analysis = self._analyze_ellipse_depth_along_axes(
+                depth_info['gradient_analysis']['cleaned_depth'], shape
+            )
+            analysis.update(axis_analysis)
+        
+        return analysis
+    
+    def _analyze_ellipse_depth_along_axes(self, cleaned_depth, shape):
+        """
+        Analyze depth variation along major and minor axes of ellipse
+        """
+        height, width = cleaned_depth.shape
+        center_x, center_y = width // 2, height // 2
+        
+        # Get ellipse parameters
+        major_axis = shape.get('major_axis', 50) / 2  # Convert to radius
+        minor_axis = shape.get('minor_axis', 50) / 2
+        angle_rad = np.radians(shape.get('angle', 0))
+        
+        # Sample along major axis
+        major_axis_depths = []
+        minor_axis_depths = []
+        
+        # Major axis direction
+        cos_a, sin_a = np.cos(angle_rad), np.sin(angle_rad)
+        
+        # Sample along major axis (in region coordinates)
+        max_sample_radius = min(major_axis, min(center_x, center_y, width - center_x, height - center_y))
+        
+        for r in np.linspace(-max_sample_radius, max_sample_radius, 20):
+            # Major axis sampling
+            x_maj = int(center_x + r * cos_a)
+            y_maj = int(center_y + r * sin_a)
+            
+            if (0 <= x_maj < width and 0 <= y_maj < height and 
+                not np.isnan(cleaned_depth[y_maj, x_maj])):
+                major_axis_depths.append(cleaned_depth[y_maj, x_maj])
+            
+            # Minor axis sampling (perpendicular to major)
+            x_min = int(center_x - r * sin_a)  # Perpendicular direction
+            y_min = int(center_y + r * cos_a)
+            
+            if (0 <= x_min < width and 0 <= y_min < height and 
+                not np.isnan(cleaned_depth[y_min, x_min])):
+                minor_axis_depths.append(cleaned_depth[y_min, x_min])
+        
+        analysis = {}
+        
+        if len(major_axis_depths) > 3:
+            analysis['major_axis_depth_std'] = np.std(major_axis_depths)
+            analysis['major_axis_depth_range'] = np.max(major_axis_depths) - np.min(major_axis_depths)
+        else:
+            analysis['major_axis_depth_std'] = 0
+            analysis['major_axis_depth_range'] = 0
+        
+        if len(minor_axis_depths) > 3:
+            analysis['minor_axis_depth_std'] = np.std(minor_axis_depths)
+            analysis['minor_axis_depth_range'] = np.max(minor_axis_depths) - np.min(minor_axis_depths)
+        else:
+            analysis['minor_axis_depth_std'] = 0
+            analysis['minor_axis_depth_range'] = 0
+        
+        # For pipes, we expect more variation along minor axis (cross-section) than major axis (length)
+        if (analysis['minor_axis_depth_std'] > 0 and analysis['major_axis_depth_std'] > 0):
+            analysis['axis_variation_ratio'] = analysis['minor_axis_depth_std'] / analysis['major_axis_depth_std']
+            analysis['has_pipe_like_variation'] = analysis['axis_variation_ratio'] > 1.2
+        else:
+            analysis['axis_variation_ratio'] = 0
+            analysis['has_pipe_like_variation'] = False
+        
+        return analysis
+    
+    def _analyze_depth_consistency(self, cleaned_depth, shape):
         """
         Analyze depth consistency to detect cylindrical structures
+        Enhanced for elliptical shapes
         """
         if np.sum(~np.isnan(cleaned_depth)) < 20:
             return 0
@@ -131,6 +239,69 @@ class PipeDetector:
         
         height, width = cleaned_depth.shape
         center_x, center_y = width // 2, height // 2
+        
+        if shape.get('type') == 'ellipse':
+            return self._analyze_elliptical_consistency(cleaned_depth, valid_mask, center_x, center_y, shape)
+        else:
+            return self._analyze_circular_consistency(cleaned_depth, valid_mask, center_x, center_y)
+    
+    def _analyze_elliptical_consistency(self, cleaned_depth, valid_mask, center_x, center_y, shape):
+        """
+        Analyze consistency for elliptical shapes
+        """
+        # For ellipses, analyze consistency along elliptical contours
+        # This is a simplified version - could be enhanced with proper elliptical sampling
+        
+        # Use circular approximation with average radius
+        major_axis = shape.get('major_axis', 50) / 2
+        minor_axis = shape.get('minor_axis', 50) / 2
+        avg_radius = (major_axis + minor_axis) / 2
+        
+        height, width = cleaned_depth.shape
+        
+        # Analyze radial depth profiles (simplified)
+        angles = np.linspace(0, 2*np.pi, 12, endpoint=False)  # 12 radial directions
+        radial_profiles = []
+        
+        max_radius = min(avg_radius, min(center_x, center_y, width - center_x, height - center_y) - 2)
+        if max_radius < 5:
+            return 0
+        
+        for angle in angles:
+            profile = []
+            for r in range(1, int(max_radius)):
+                x = int(center_x + r * np.cos(angle))
+                y = int(center_y + r * np.sin(angle))
+                
+                if (0 <= x < width and 0 <= y < height and 
+                    valid_mask[y, x]):
+                    profile.append(cleaned_depth[y, x])
+            
+            if len(profile) > 3:
+                radial_profiles.append(np.array(profile))
+        
+        if len(radial_profiles) < 6:
+            return 0
+        
+        # Calculate consistency between radial profiles
+        consistency_scores = []
+        for i in range(len(radial_profiles)):
+            for j in range(i+1, len(radial_profiles)):
+                if len(radial_profiles[i]) > 0 and len(radial_profiles[j]) > 0:
+                    min_len = min(len(radial_profiles[i]), len(radial_profiles[j]))
+                    if min_len > 3:
+                        corr = np.corrcoef(radial_profiles[i][:min_len], 
+                                         radial_profiles[j][:min_len])[0, 1]
+                        if not np.isnan(corr):
+                            consistency_scores.append(abs(corr))
+        
+        return np.mean(consistency_scores) if consistency_scores else 0
+    
+    def _analyze_circular_consistency(self, cleaned_depth, valid_mask, center_x, center_y):
+        """
+        Original circular consistency analysis
+        """
+        height, width = cleaned_depth.shape
         
         # Analyze radial depth profiles
         angles = np.linspace(0, 2*np.pi, 16, endpoint=False)  # 16 radial directions
@@ -157,7 +328,6 @@ class PipeDetector:
             return 0
         
         # Calculate consistency between radial profiles
-        # For a cylinder, profiles should be similar
         consistency_scores = []
         for i in range(len(radial_profiles)):
             for j in range(i+1, len(radial_profiles)):
@@ -220,9 +390,10 @@ class PipeDetector:
         
         return abs(correlation) if not np.isnan(correlation) else 0
     
-    def _decide_pipe_detection(self, pipe_analysis):
+    def _decide_pipe_detection(self, pipe_analysis, shape):
         """
         Make the final decision on whether this is a pipe
+        Enhanced for elliptical shapes
         """
         confidence_factors = []
         detection_details = []
@@ -236,34 +407,52 @@ class PipeDetector:
             confidence_factors.append(0.25)
             detection_details.append("Strong depth gradients")
         
-        if pipe_analysis.get('has_circular_pattern', False):
+        if pipe_analysis.get('has_pipe_pattern', False):
             confidence_factors.append(0.3)
-            detection_details.append("Circular gradient pattern")
+            detection_details.append("Pipe gradient pattern")
         
         if pipe_analysis.get('has_consistent_depth', False):
             confidence_factors.append(0.2)
             detection_details.append("Consistent radial depth")
         
-        # Additional scoring from cylindrical analysis
-        cylindrical_score = pipe_analysis.get('cylindrical_score', 0)
-        if cylindrical_score > 0.5:
-            confidence_factors.append(cylindrical_score * 0.3)
-            detection_details.append(f"Cylindrical shape (score: {cylindrical_score:.2f})")
+        # Shape-specific scoring
+        if shape.get('type') == 'ellipse':
+            # Ellipse-specific factors
+            if pipe_analysis.get('has_pipe_like_ratio', False):
+                confidence_factors.append(0.15)
+                detection_details.append(f"Pipe-like aspect ratio ({pipe_analysis.get('ellipse_axis_ratio', 0):.2f})")
+            
+            if pipe_analysis.get('has_pipe_like_variation', False):
+                confidence_factors.append(0.15)
+                detection_details.append("Pipe-like depth variation pattern")
+            
+            # Bonus for elliptical shapes (pipes often appear elliptical)
+            confidence_factors.append(self.pipe_detection_params['ellipse_bonus'])
+            detection_details.append("Elliptical shape bonus")
+            
+        else:
+            # Additional scoring from cylindrical analysis for circles
+            cylindrical_score = pipe_analysis.get('cylindrical_score', 0)
+            if cylindrical_score > 0.5:
+                confidence_factors.append(cylindrical_score * 0.3)
+                detection_details.append(f"Cylindrical shape (score: {cylindrical_score:.2f})")
         
         # Calculate overall confidence
         confidence = min(1.0, sum(confidence_factors))
         
-        # Decision threshold
-        is_pipe = confidence > 0.6
+        # Decision threshold (slightly lower for ellipses)
+        threshold = 0.55 if shape.get('type') == 'ellipse' else 0.6
+        is_pipe = confidence > threshold
         
         if not detection_details:
             detection_details.append("No pipe characteristics detected")
         
         return is_pipe, confidence, "; ".join(detection_details)
     
-    def _calculate_pipe_direction(self, depth_info, pipe_analysis):
+    def _calculate_pipe_direction(self, depth_info, pipe_analysis, shape):
         """
         Calculate the 3D pipe axis direction using depth information
+        Enhanced for elliptical shapes
         """
         if 'cleaned_depth' not in depth_info['gradient_analysis']:
             return None, None
@@ -303,12 +492,14 @@ class PipeDetector:
             pca = PCA(n_components=3)
             pca.fit(centered_points)
             
-            # The first principal component is the pipe axis direction in 3D
+            # For ellipses, we might want to consider the ellipse orientation
             pipe_axis_3d = pca.components_[0]
             
-            # Calculate the direction angles
-            # For a pipe, we want the direction that points most into/out of the image plane
-            direction_angles = self._calculate_3d_direction_angles(pipe_axis_3d)
+            # If we have ellipse information, we can use it to refine the direction
+            if shape.get('type') == 'ellipse':
+                direction_angles = self._calculate_ellipse_3d_direction(pipe_axis_3d, shape)
+            else:
+                direction_angles = self._calculate_3d_direction_angles(pipe_axis_3d)
             
             # Also calculate the projection on the image plane for visualization
             image_plane_projection = self._project_to_image_plane(pipe_axis_3d)
@@ -317,12 +508,49 @@ class PipeDetector:
                 'axis_3d': pipe_axis_3d,
                 'centroid_3d': centroid,
                 'image_projection': image_plane_projection,
-                'explained_variance': pca.explained_variance_ratio_
+                'explained_variance': pca.explained_variance_ratio_,
+                'shape_type': shape.get('type', 'circle')
             }
             
         except Exception as e:
             print(f"Error in 3D pipe direction calculation: {e}")
             return None, None
+    
+    def _calculate_ellipse_3d_direction(self, axis_3d, shape):
+        """
+        Calculate 3D direction angles for elliptical pipes
+        Incorporates ellipse orientation information
+        """
+        # Start with basic 3D direction calculation
+        direction_info = self._calculate_3d_direction_angles(axis_3d)
+        
+        if direction_info is None:
+            return None
+        
+        # Add ellipse-specific information
+        ellipse_angle = shape.get('angle', 0)
+        major_axis = shape.get('major_axis', 50)
+        minor_axis = shape.get('minor_axis', 50)
+        
+        direction_info['ellipse_major_axis_angle'] = ellipse_angle
+        direction_info['ellipse_aspect_ratio'] = minor_axis / major_axis if major_axis > 0 else 1.0
+        
+        # The ellipse major axis in the image plane might indicate pipe direction
+        # Convert ellipse angle to match our coordinate system
+        ellipse_direction_2d = ellipse_angle
+        direction_info['ellipse_direction_2d'] = ellipse_direction_2d
+        
+        # Compare ellipse orientation with 3D pipe axis projection
+        if 'image_projection' in direction_info and direction_info['image_projection'] is not None:
+            proj_angle = direction_info['image_projection'].get('angle_deg', 0)
+            angle_diff = abs(ellipse_direction_2d - proj_angle)
+            # Handle angle wrap-around
+            if angle_diff > 90:
+                angle_diff = 180 - angle_diff
+            
+            direction_info['ellipse_3d_alignment'] = 90 - angle_diff  # Higher = better alignment
+        
+        return direction_info
     
     def _calculate_3d_direction_angles(self, axis_3d):
         """
@@ -399,7 +627,7 @@ class PipeDetector:
 def test_pipe_detection():
     """Test the pipe detection with sample data"""
     from step1_data_loading import DataLoader
-    from step2_circle_detection import CircleDetector
+    from step2_circle_detection import CircleEllipseDetector
     from step3_depth_analysis import DepthAnalyzer
     
     snapshot_base = Path("../snapshot")
@@ -413,24 +641,31 @@ def test_pipe_detection():
         loader = DataLoader()
         ir_image, depth_image, params = loader.load_data(snapshot_base / test_folder)
         
-        detector = CircleDetector()
-        enhanced_ir, circles = detector.detect_circles(ir_image)
+        detector = CircleEllipseDetector()
+        enhanced_ir, shapes = detector.detect_circles_and_ellipses(ir_image)
         
-        if circles:
+        if shapes:
             analyzer = DepthAnalyzer()
             pipe_detector = PipeDetector()
             
-            for i, circle in enumerate(circles):
-                print(f"\nAnalyzing Circle {i+1} at {circle['center']} (r={circle['radius']}):")
+            for i, shape in enumerate(shapes):
+                shape_desc = f"{shape['type'].capitalize()} {i+1} at {shape['center']}"
+                if shape['type'] == 'ellipse':
+                    shape_desc += f" (major={shape['major_axis']}, minor={shape['minor_axis']}, angle={shape['angle']:.1f}°)"
+                else:
+                    shape_desc += f" (r={shape['radius']})"
+                
+                print(f"\nAnalyzing {shape_desc}:")
                 
                 # Get depth analysis
-                depth_info = analyzer.analyze_circle_depth(depth_image, circle, radius_multiplier=3)
+                depth_info = analyzer.analyze_shape_depth(depth_image, shape, radius_multiplier=2)
                 
                 # Detect pipe
-                pipe_result = pipe_detector.detect_pipe(depth_info, circle)
+                pipe_result = pipe_detector.detect_pipe(depth_info, shape)
                 
                 print(f"  Is pipe: {pipe_result['is_pipe']}")
                 print(f"  Confidence: {pipe_result['confidence']:.2f}")
+                print(f"  Shape type: {pipe_result['shape_type']}")
                 print(f"  Details: {pipe_result['detection_details']}")
                 
                 if pipe_result['direction'] is not None:
@@ -442,13 +677,18 @@ def test_pipe_detection():
                     print(f"    Image plane angle: {direction_info['image_plane_angle_deg']:.1f}°")
                     print(f"    3D axis: [{direction_info['axis_3d_normalized'][0]:.3f}, {direction_info['axis_3d_normalized'][1]:.3f}, {direction_info['axis_3d_normalized'][2]:.3f}]")
                     
+                    # Ellipse-specific direction info
+                    if 'ellipse_major_axis_angle' in direction_info:
+                        print(f"    Ellipse major axis angle: {direction_info['ellipse_major_axis_angle']:.1f}°")
+                        print(f"    Ellipse-3D alignment: {direction_info.get('ellipse_3d_alignment', 0):.1f}°")
+                    
                     if pipe_result['pipe_axis'] and 'explained_variance' in pipe_result['pipe_axis']:
                         variance_ratio = pipe_result['pipe_axis']['explained_variance']
                         print(f"    PCA variance explained: {variance_ratio[0]:.3f} (1st), {variance_ratio[1]:.3f} (2nd), {variance_ratio[2]:.3f} (3rd)")
             
             print("\nPipe detection test completed successfully!")
         else:
-            print("No circles detected for pipe analysis")
+            print("No shapes detected for pipe analysis")
     else:
         print("No snapshot folders found for testing")
 

@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 """
 Main pipeline for pipe detection and localization using IR and Depth images.
+Enhanced to detect both circular and elliptical pipe cross-sections.
 """
 
 import os
@@ -11,7 +12,7 @@ import matplotlib.pyplot as plt
 from pathlib import Path
 
 from step1_data_loading import DataLoader
-from step2_circle_detection import CircleDetector
+from step2_circle_detection import CircleEllipseDetector
 from step3_depth_analysis import DepthAnalyzer
 from step4_pipe_detection import PipeDetector
 from step5_visualization import Visualizer
@@ -26,7 +27,7 @@ class PipeDetectionPipeline:
         
         # Initialize all components
         self.data_loader = DataLoader()
-        self.circle_detector = CircleDetector()
+        self.shape_detector = CircleEllipseDetector()
         self.depth_analyzer = DepthAnalyzer()
         self.pipe_detector = PipeDetector()
         self.visualizer = Visualizer()
@@ -41,19 +42,20 @@ class PipeDetectionPipeline:
             self.snapshot_path / folder_name
         )
         
-        # Step 2: Detect circles in IR image
-        print("Step 2: Detecting circles in IR image...")
-        enhanced_ir, circles = self.circle_detector.detect_circles(ir_image)
+        # Step 2: Detect circles and ellipses in IR image
+        print("Step 2: Detecting shapes (circles and ellipses) in IR image...")
+        enhanced_ir, shapes = self.shape_detector.detect_circles_and_ellipses(ir_image)
         
-        # Save circle detection debug visualization
-        self.circle_detector.save_debug_visualization(ir_image, enhanced_ir, circles, folder_name)
+        # Save shape detection debug visualization
+        self.shape_detector.save_debug_visualization(ir_image, enhanced_ir, shapes, folder_name)
         
-        # Step 3: Analyze depth information for each circle
+        # Step 3: Analyze depth information for each shape
         print("Step 3: Analyzing depth information...")
         depth_analysis_results = []
-        for circle in circles:
-            depth_info = self.depth_analyzer.analyze_circle_depth(
-                depth_image, circle, radius_multiplier=2
+        for shape in shapes:
+            # Use major axis * 2 as square side for ellipses, radius * 2 for circles
+            depth_info = self.depth_analyzer.analyze_shape_depth(
+                depth_image, shape, radius_multiplier=2
             )
             depth_analysis_results.append(depth_info)
         
@@ -63,22 +65,65 @@ class PipeDetectionPipeline:
         # Step 4: Detect pipe structures
         print("Step 4: Detecting pipe structures...")
         pipe_detection_results = []
-        for i, (circle, depth_info) in enumerate(zip(circles, depth_analysis_results)):
-            pipe_info = self.pipe_detector.detect_pipe(depth_info, circle)
+        for i, (shape, depth_info) in enumerate(zip(shapes, depth_analysis_results)):
+            pipe_info = self.pipe_detector.detect_pipe(depth_info, shape)
             pipe_detection_results.append(pipe_info)
         
         # Step 5: Create final visualization
         print("Step 5: Creating final visualization...")
         final_result = self.visualizer.create_final_visualization(
-            enhanced_ir, circles, pipe_detection_results, folder_name
+            enhanced_ir, shapes, pipe_detection_results, folder_name
         )
         
         # Save results
         output_folder = self.output_path / folder_name
         output_folder.mkdir(exist_ok=True)
         
+        # Print summary
+        self._print_detection_summary(shapes, pipe_detection_results)
+        
         print(f"Pipeline completed! Results saved to: {output_folder}")
         return final_result
+    
+    def _print_detection_summary(self, shapes, pipe_detection_results):
+        """Print a summary of the detection results"""
+        print("\n" + "="*60)
+        print("DETECTION SUMMARY")
+        print("="*60)
+        
+        total_shapes = len(shapes)
+        circles = [s for s in shapes if s.get('type') == 'circle']
+        ellipses = [s for s in shapes if s.get('type') == 'ellipse']
+        detected_pipes = [r for r in pipe_detection_results if r.get('is_pipe', False)]
+        
+        print(f"Total shapes detected: {total_shapes}")
+        print(f"  - Circles: {len(circles)}")
+        print(f"  - Ellipses: {len(ellipses)}")
+        print(f"Pipes detected: {len(detected_pipes)}")
+        
+        if detected_pipes:
+            print("\nPipe Details:")
+            for i, (shape, pipe_result) in enumerate(zip(shapes, pipe_detection_results)):
+                if pipe_result.get('is_pipe', False):
+                    shape_type = shape.get('type', 'unknown')
+                    confidence = pipe_result.get('confidence', 0)
+                    
+                    if shape_type == 'ellipse':
+                        shape_desc = (f"Ellipse at {shape['center']} "
+                                    f"(major={shape['major_axis']}, minor={shape['minor_axis']}, "
+                                    f"angle={shape['angle']:.1f}°)")
+                    else:
+                        shape_desc = f"Circle at {shape['center']} (r={shape['radius']})"
+                    
+                    print(f"  {i+1}. {shape_desc}")
+                    print(f"     Confidence: {confidence:.2f}")
+                    
+                    if pipe_result.get('direction'):
+                        direction = pipe_result['direction']
+                        print(f"     3D Direction: azimuth={direction['azimuth_deg']:.1f}°, "
+                              f"elevation={direction['elevation_deg']:.1f}°")
+        
+        print("="*60)
 
 
 def main():
