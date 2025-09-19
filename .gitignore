@@ -2,3 +2,5 @@ results/*
 snapshot/*
 depth_analysis_output/*
 pipe-python/__pycache__/*
+pipe-python-v2/__pycache__/*
+pipe-python-v2/results/*
