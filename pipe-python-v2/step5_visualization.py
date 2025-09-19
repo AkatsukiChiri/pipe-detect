@@ -87,7 +87,7 @@ class Visualizer:
                     label = f"Ellipse {i+1}"
                 else:
                     shape_color = self.colors['circle_only']
-                    label = f"Circle {i+1}"
+                label = f"Circle {i+1}"
             
             # Draw shape (circle or ellipse)
             self._draw_shape(result_image, shape, shape_color)
@@ -398,7 +398,7 @@ class Visualizer:
             legend_thickness = max(1, int(1.5 * self.visualization_params['scale_factor']))
             
             cv2.putText(image, text, (text_x, y_pos + rect_size//4),
-                       self.visualization_params['text_font'], 
+                       self.visualization_params['text_font'],
                        legend_font, 
                        (255, 255, 255), legend_thickness)
     
